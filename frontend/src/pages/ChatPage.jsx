@@ -1,5 +1,5 @@
 // frontend/pages/ChatPage.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
 import ChatArea from "../components/ChatArea";
@@ -14,59 +14,92 @@ export default function ChatPage({ user, onLogout }) {
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, type: "", data: null });
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    type: "",
+    data: null,
+  });
 
-  // 🔹 Load semua session user dari backend
   useEffect(() => {
     const fetchSessions = async () => {
       try {
         const res = await api.get("/sessions");
-        setSessions(res.data || []);
-        if (res.data.length > 0) {
-          setActiveSessionId(res.data[0].id);
+        const fetchedSessions = res.data || [];
+        setSessions(fetchedSessions);
+
+        if (fetchedSessions.length > 0 && !activeSessionId) {
+          setActiveSessionId(fetchedSessions[0].id);
         }
       } catch (err) {
-        console.error("Error fetching sessions:", err);
+        console.error("❌ Error fetching sessions:", err);
       }
     };
-    fetchSessions();
-  }, []);
 
-  // 🔹 Load pesan dari session aktif
+    fetchSessions();
+  }, []); // ✅ BENAR — cuma load sekali
+
+  // 🔹 Load pesan ketika activeSessionId berubah
   useEffect(() => {
-    const fetchMessages = async () => {
-      if (!activeSessionId) return;
+    if (!activeSessionId) return;
+
+    async function loadMessages() {
       try {
-        const res = await api.get(`/messages/${activeSessionId}`);
-        setMessages((prev) => ({ ...prev, [activeSessionId]: res.data || [] }));
+        const res = await api.get(`/chats/${activeSessionId}`);
+        const formatted = (res.data || []).map((m) => ({
+          role: m.role,
+          content: m.content,
+          timestamp: m.createdAt,
+        }));
+
+        setMessages((prev) => ({
+          ...prev,
+          [activeSessionId]: formatted,
+        }));
       } catch (err) {
-        console.error("Error fetching messages:", err);
+        console.error("❌ Error loading messages:", err);
       }
-    };
-    fetchMessages();
+    }
+
+    loadMessages();
   }, [activeSessionId]);
 
-  // 🔹 Buat session baru di backend
+  // 🔹 Buat session baru
   const createNewSession = async () => {
     try {
-      const res = await api.post("/sessions", { title: "New Chat" });
+      const res = await api.post("/sessions", { title: "Percakapan Baru" });
       const newSession = res.data;
       setSessions((prev) => [newSession, ...prev]);
       setMessages((prev) => ({ ...prev, [newSession.id]: [] }));
       setActiveSessionId(newSession.id);
     } catch (err) {
-      console.error("Error creating session:", err);
+      console.error("❌ Error creating session:", err);
     }
   };
 
-  // 🔹 Hapus session dari backend
+  // 🔹 rename session
+  const renameSession = async (sessionId, newTitle) => {
+  try {
+    await api.put(`/sessions/${sessionId}`, { title: newTitle });
+
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId ? { ...s, title: newTitle } : s
+      )
+    );
+  } catch (err) {
+    console.error("❌ Error renaming session:", err);
+  }
+};
+
+
+  // 🔹 Hapus session
   const deleteSession = (sessionId) => {
     setConfirmDialog({
       isOpen: true,
       type: "delete_session",
       data: sessionId,
-      title: "Delete Chat Session",
-      message: "Are you sure you want to delete this chat? This action cannot be undone.",
+      title: "Hapus Percakapan",
+      message: "Apakah kamu yakin ingin menghapus percakapan ini?",
     });
   };
 
@@ -80,54 +113,29 @@ export default function ChatPage({ user, onLogout }) {
         delete copy[sessionId];
         return copy;
       });
+
       if (activeSessionId === sessionId) {
         const remaining = sessions.filter((s) => s.id !== sessionId);
         if (remaining.length > 0) setActiveSessionId(remaining[0].id);
         else createNewSession();
       }
     } catch (err) {
-      console.error("Error deleting session:", err);
+      console.error("❌ Error deleting session:", err);
     }
     setConfirmDialog({ isOpen: false, type: "", data: null });
   };
 
-  // 🔹 Rename session di backend
-  const renameSession = async (sessionId, newTitle) => {
-    try {
-      await api.put(`/sessions/${sessionId}`, { title: newTitle });
-      setSessions((prev) =>
-        prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s))
-      );
-    } catch (err) {
-      console.error("Error renaming session:", err);
-    }
-  };
-
-  // 🔹 Pin/unpin session (opsional)
-  const togglePinSession = async (sessionId) => {
-    const session = sessions.find((s) => s.id === sessionId);
-    try {
-      await api.put(`/sessions/${sessionId}`, { isPinned: !session.isPinned });
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === sessionId ? { ...s, isPinned: !s.isPinned } : s
-        )
-      );
-    } catch (err) {
-      console.error("Error toggling pin:", err);
-    }
-  };
-
-  // 🔹 Kirim pesan ke backend
+  // In ChatPage.jsx, modify the sendMessage function
   const sendMessage = async () => {
     if (!inputText.trim() || loading || !activeSessionId) return;
 
     const newUserMessage = {
       role: "user",
       content: inputText,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
 
+    // tampilkan pesan user dulu
     setMessages((prev) => ({
       ...prev,
       [activeSessionId]: [...(prev[activeSessionId] || []), newUserMessage],
@@ -138,65 +146,73 @@ export default function ChatPage({ user, onLogout }) {
     setLoading(true);
 
     try {
-      const res = await api.post(`/messages/${activeSessionId}`, {
-        content: savedInput,
+      // POST ke endpoint yang benar
+      const res = await api.post(`/chats`, {
+        sessionId: activeSessionId,
+        message: savedInput,
       });
 
-      const aiMessage = res.data;
+      const aiMessage = {
+        role: "assistant",
+        content: res.data.reply,
+        timestamp: new Date().toISOString(),
+      };
+
+      // tampilkan AI message
       setMessages((prev) => ({
         ...prev,
         [activeSessionId]: [...(prev[activeSessionId] || []), aiMessage],
       }));
 
-      // update judul session
+      // update title kalau baru
       setSessions((prev) =>
         prev.map((s) =>
-          s.id === activeSessionId && s.messageCount === 0
-            ? { ...s, title: savedInput.slice(0, 30) }
+          s.id === activeSessionId && s.title === "Percakapan Baru"
+            ? {
+                ...s,
+                title:
+                  savedInput.slice(0, 30) +
+                  (savedInput.length > 30 ? "..." : ""),
+              }
             : s
         )
       );
+
+      // 🚀 setelah post → GET pesan terbaru dari database
+      const refresh = await api.get(`/chats/${activeSessionId}`);
+      const formatted = (refresh.data || []).map((m) => ({
+        role: m.role,
+        content: m.content,
+        timestamp: m.createdAt,
+      }));
+
+      setMessages((prev) => ({
+        ...prev,
+        [activeSessionId]: formatted,
+      }));
     } catch (err) {
-      console.error("Error sending message:", err);
+      console.error("❌ Error sending message:", err);
+      setMessages((prev) => ({
+        ...prev,
+        [activeSessionId]: (prev[activeSessionId] || []).slice(0, -1),
+      }));
     } finally {
       setLoading(false);
     }
   };
 
-  // 🔹 Regenerate AI response
-  const regenerateResponse = async (messageId) => {
-    try {
-      setLoading(true);
-      const res = await api.post(`/messages/${activeSessionId}/regenerate`, {
-        messageId,
-      });
-      const newResponse = res.data;
-
-      setMessages((prev) => {
-        const updated = [...(prev[activeSessionId] || [])];
-        const idx = updated.findIndex((m) => m.id === messageId);
-        if (idx !== -1) updated[idx] = newResponse;
-        return { ...prev, [activeSessionId]: updated };
-      });
-    } catch (err) {
-      console.error("Error regenerating message:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 🔹 Copy message
+  // 🔹 Copy pesan
   const copyMessage = (content) => {
     navigator.clipboard.writeText(content);
   };
 
-  // 🔹 Logout confirm
+  // 🔹 Logout
   const handleLogoutClick = () => {
     setConfirmDialog({
       isOpen: true,
       type: "logout",
       title: "Logout",
-      message: "Are you sure you want to logout?",
+      message: "Apakah kamu yakin ingin logout?",
     });
   };
 
@@ -205,27 +221,33 @@ export default function ChatPage({ user, onLogout }) {
     onLogout();
   };
 
-  // 🔹 Sort sessions
-  const sortedSessions = [...sessions].sort((a, b) => {
-    if (a.isPinned && !b.isPinned) return -1;
-    if (!a.isPinned && b.isPinned) return 1;
-    return new Date(b.createdAt) - new Date(a.createdAt);
-  });
-
-  const activeMessages = messages[activeSessionId] || [];
+  // 🔹 Urutkan session (baru dulu)
+  const sortedSessions = useMemo(
+    () =>
+      [...sessions].sort(
+        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      ),
+    [sessions]
+  );
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      <Sidebar
-        sessions={sortedSessions}
-        activeSessionId={activeSessionId}
-        onSessionClick={setActiveSessionId}
-        onNewChat={createNewSession}
-        onDeleteSession={deleteSession}
-        onRenameSession={renameSession}
-        onTogglePin={togglePinSession}
-        isOpen={sidebarOpen}
-      />
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      <div
+        className={`${
+          sidebarOpen ? "w-64" : "w-0"
+        } transition-all duration-300`}
+      >
+        <Sidebar
+          sessions={sortedSessions}
+          activeSessionId={activeSessionId}
+          onSessionClick={setActiveSessionId}
+          onNewChat={createNewSession}
+          onDeleteSession={deleteSession}
+          onRenameSession={renameSession}
+          onTogglePin={() => {}}
+          isOpen={sidebarOpen}
+        />
+      </div>
 
       <div className="flex-1 flex flex-col">
         <Navbar
@@ -236,9 +258,8 @@ export default function ChatPage({ user, onLogout }) {
         />
 
         <ChatArea
-          messages={activeMessages}
-          loading={loading}
-          onRegenerateResponse={regenerateResponse}
+          activeSessionId={activeSessionId}
+          messages={messages[activeSessionId] || []}
           onCopyMessage={copyMessage}
         />
 
@@ -259,7 +280,9 @@ export default function ChatPage({ user, onLogout }) {
             ? confirmDeleteSession
             : confirmLogout
         }
-        onCancel={() => setConfirmDialog({ isOpen: false, type: "", data: null })}
+        onCancel={() =>
+          setConfirmDialog({ isOpen: false, type: "", data: null })
+        }
       />
     </div>
   );

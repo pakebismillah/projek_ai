@@ -1,9 +1,12 @@
-// backend/agent/Agent.js
+// backend/agent/agent.js
 import { ChatOpenAI } from "@langchain/openai";
-import { ConversationChain } from "langchain/chains";
-import { BufferMemory } from "langchain/memory";
-import { HumanMessage, AIMessage } from "@langchain/core/messages";
-import ChatMessage  from "../models/ChatMessage.js";
+import { BufferMemory, ChatMessageHistory } from "langchain/memory";
+import { ChatMessage } from "../models/Models.js";
+import { RunnableSequence } from "@langchain/core/runnables";
+import {
+  ChatPromptTemplate,
+  MessagesPlaceholder,
+} from "@langchain/core/prompts";
 
 const llm = new ChatOpenAI({
   modelName: "gpt-4o-mini",
@@ -11,47 +14,74 @@ const llm = new ChatOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-/**
- * 🛠️ Membuat agent baru dengan memory berdasarkan pesan lama
- */
-function createAgent(pastMessages) {
-  const memory = new BufferMemory({
-    returnMessages: true,
-    inputKey: "input",
-    outputKey: "output",
-    chatHistory: pastMessages || [],
-  });
-
-  return new ConversationChain({
-    llm,
-    memory,
-  });
-}
-
-/**
- * 💬 Fungsi untuk tanya ke agent
- */
 export async function askAgent(sessionId, userMessage) {
-  // 1. Ambil riwayat chat dari DB
-  const history = await ChatMessage.findAll({
+  console.log(
+    "🧠 askAgent called with sessionId:",
+    sessionId,
+    "and message:",
+    userMessage
+  );
+
+  // 1️⃣ Ambil history dari DB
+  const historyMessages = await ChatMessage.findAll({
     where: { sessionId },
     order: [["createdAt", "ASC"]],
   });
+  console.log("📜 Loaded history messages:", historyMessages.length);
 
-  // 2. Ubah riwayat jadi format LangChain
-  const pastMessages = history.map(m =>
-    m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content)
-  );
+  // 2️⃣ Konversi ke format LangChain
+  const chatHistory = new ChatMessageHistory();
+  for (const msg of historyMessages) {
+    console.log(`   ↳ ${msg.role}: ${msg.content}`);
+    if (msg.role === "user") chatHistory.addUserMessage(msg.content);
+    else if (msg.role === "assistant") chatHistory.addAIMessage(msg.content);
+  }
 
-  // 3. Buat agent baru
-  const agent = createAgent(pastMessages);
+  // 3️⃣ Setup memory
+  const memory = new BufferMemory({
+    chatHistory,
+    returnMessages: true,
+    memoryKey: "history",
+    inputKey: "input",
+    outputKey: "output",
+  });
+  console.log("💾 Memory initialized");
 
-  // 4. Invoke model
-  const res = await agent.invoke({ input: userMessage });
+  // 4️⃣ Template prompt
+  const prompt = ChatPromptTemplate.fromMessages([
+    new MessagesPlaceholder("history"),
+    ["human", "{input}"],
+  ]);
 
-  // 5. Simpan pesan baru ke DB
-  await ChatMessage.create({ sessionId, role: "user", content: userMessage });
-  await ChatMessage.create({ sessionId, role: "assistant", content: res.output });
+  console.log("🧩 Prompt template created");
 
-  return res.output;
+  // 5️⃣ Buat chain runnable
+  const chain = RunnableSequence.from([
+    {
+      history: async () => {
+        const vars = await memory.loadMemoryVariables({});
+        console.log("📚 Loaded memory variables:", vars);
+        return vars.history || [];
+      },
+      input: (input) => input.input,
+    },
+    prompt,
+    llm,
+    async (output, { input }) => {
+      console.log("🤖 Model output received:", output);
+      await memory.saveContext(
+        { input: input || userMessage },
+        { output: output.content }
+      );
+      console.log("✅ Context saved to memory");
+      return output.content;
+    },
+  ]);
+
+  // 6️⃣ Jalankan agent
+  console.log("🚀 Running agent chain...");
+  const response = await chain.invoke({ input: userMessage || "(no message)" });
+
+  console.log("💬 Final response:", response);
+  return response;
 }

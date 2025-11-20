@@ -1,6 +1,7 @@
 import React from 'react';
 import { Plus } from 'lucide-react';
-import SessionItem from './SessionItem';
+
+
 
 export default function Sidebar({ 
   sessions, 

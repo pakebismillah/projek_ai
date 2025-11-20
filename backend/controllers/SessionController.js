@@ -46,6 +46,33 @@ export const getSessionById = async (req, res) => {
   }
 };
 
+// ✅ Update / Rename session
+export const updateSession = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title } = req.body;
+
+    const session = await Session.findOne({
+      where: { id, userId: req.user.id },
+    });
+
+    if (!session)
+      return res.status(404).json({ message: "Session tidak ditemukan" });
+
+    session.title = title || session.title;
+    await session.save();
+
+    res.json({
+      message: "Session berhasil diupdate",
+      session,
+    });
+  } catch (error) {
+    console.error("❌ Error updateSession:", error);
+    res.status(500).json({ message: "Gagal mengupdate session" });
+  }
+};
+
+
 // ✅ Hapus session
 export const deleteSession = async (req, res) => {
   try {

@@ -25,6 +25,7 @@ export default function AuthPage({ onAuthSuccess }) {
       const userCredential = await authPromise;
       const user = userCredential.user;
       const idToken = await user.getIdToken(true);
+      
 
       // 2️⃣ Simpan token di localStorage
       localStorage.setItem("token", idToken);
@@ -54,7 +55,12 @@ export default function AuthPage({ onAuthSuccess }) {
           });
           backendUser = res.data;
           console.log("✅ User profile fetched:", backendUser.email);
+          if (user) {
+  user.getIdToken().then((token) => {
+    console.log("🔥 Firebase Token:", token);
+  });}
           break; // Berhasil, keluar dari loop
+          
         } catch (err) {
           console.error(
             `❌ Attempt ${4 - retries} failed:`,

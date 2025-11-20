@@ -1,34 +1,33 @@
-// backend/controllers/ChatController.js
+//backend\controllers\ChatController.js
 import models from "../models/Models.js";
 import { askAgent } from "../agent/agent.js";  
-const { Chat, Session } = models;
+const { ChatMessage, Session } = models;
 
-// kirim pesan ke AI + simpan ke DB
 export const sendMessage = async (req, res) => {
   try {
-    const { sessionId, message } = req.body;
+    const { sessionId, userMessage, message } = req.body;
+    const finalMessage = userMessage || message;
 
-    // cek session valid milik user
-    const session = await Session.findOne({ 
-      where: { id: sessionId, userId: req.user.id } 
+    const session = await Session.findOne({
+      where: { id: sessionId, userId: req.user.id },
     });
     if (!session) return res.status(404).json({ message: "Session not found" });
 
-    // panggil agent
-    const aiReply = await askAgent(message, sessionId);
+    // Panggil AI
+    const aiReply = await askAgent(sessionId, finalMessage);
 
-    // simpan pesan user
-    await Chat.create({
+    // Simpan pesan user
+    await ChatMessage.create({
       sessionId,
-      sender: "user",
-      message,
+      role: "user",
+      content: finalMessage,
     });
 
-    // simpan jawaban AI
-    await Chat.create({
+    // Simpan balasan AI
+    await ChatMessage.create({
       sessionId,
-      sender: "ai",
-      message: aiReply,
+      role: "assistant",
+      content: aiReply,
     });
 
     res.json({ reply: aiReply });
@@ -38,23 +37,24 @@ export const sendMessage = async (req, res) => {
   }
 };
 
-// ambil semua chat dari session tertentu
+
 export const getChats = async (req, res) => {
   try {
     const { sessionId } = req.params;
 
-    const session = await Session.findOne({ 
-      where: { id: sessionId, userId: req.user.id } 
+    const session = await Session.findOne({
+      where: { id: sessionId, userId: req.user.id },
     });
     if (!session) return res.status(404).json({ message: "Session not found" });
 
-    const chats = await Chat.findAll({
+    const chats = await ChatMessage.findAll({
       where: { sessionId },
       order: [["createdAt", "ASC"]],
     });
 
     res.json(chats);
   } catch (error) {
+    console.error("getChats error:", error);
     res.status(500).json({ message: error.message });
   }
 };

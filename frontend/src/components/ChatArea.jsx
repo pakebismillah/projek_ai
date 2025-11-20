@@ -1,37 +1,39 @@
-import React, { useEffect, useRef } from 'react';
-import MessageBubble from './MessageBubble';
-import TypingIndicator from './TypingIndicator';
-import EmptyState from './EmptyState';
+import React, { useEffect, useRef } from "react";
+import MessageBubble from "./MessageBubble";
+import EmptyState from "./EmptyState";
 
-export default function ChatArea({ messages, loading, onRegenerateResponse, onCopyMessage }) {
-  const messagesEndRef = useRef(null);
+export default function ChatArea({ 
+  activeSessionId, 
+  messages = [],
+  onCopyMessage
+}) {
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const bottomRef = useRef(null);
 
+  // Auto scroll ke bawah saat pesan bertambah atau session berubah
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, loading]);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, activeSessionId]);
+
+  if (!activeSessionId) return <EmptyState />;
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {messages.length === 0 ? (
-          <EmptyState />
-        ) : (
-          messages.map(message => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              onRegenerate={() => onRegenerateResponse(message.id)}
-              onCopy={() => onCopyMessage(message.content)}
-            />
-          ))
-        )}
-        {loading && <TypingIndicator />}
-        <div ref={messagesEndRef} />
-      </div>
+    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-gray-50">
+
+      {messages.length === 0 && (
+        <p className="text-center text-gray-400">Belum ada pesan...</p>
+      )}
+
+      {messages.map((msg, index) => (
+        <MessageBubble 
+          key={msg.id || msg._id || index}
+          message={msg}
+          onCopyMessage={onCopyMessage}
+        />
+      ))}
+
+      {/* Auto scroll anchor */}
+      <div ref={bottomRef} />
     </div>
   );
 }
